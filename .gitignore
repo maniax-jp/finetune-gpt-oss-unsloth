@@ -1,0 +1,61 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Environment
+.env
+.envrc
+
+# CUDA Toolkit installers
+*.run
+
+# Model files
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+
+# Training outputs
+outputs/
+checkpoints/
+logs/
+wandb/
+
+# Dataset
+dataset/
+data/
+*.jsonl
+*.json
+
+# Cache
+.cache/
+*.cache
+unsloth_compiled_cache/
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
