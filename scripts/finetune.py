@@ -16,6 +16,7 @@ def load_model_and_tokenizer(
     model_name="openai/gpt-oss-20b",
     max_seq_length=2048,
     load_in_4bit=True,
+    lora_rank=32,
 ):
     """Load GPT-OSS 20B with Unsloth + QLoRA"""
 
@@ -33,12 +34,12 @@ def load_model_and_tokenizer(
     # Apply QLoRA
     model = FastLanguageModel.get_peft_model(
         model,
-        r=32,  # LoRA rank
+        r=lora_rank,  # LoRA rank (configurable)
         target_modules=[
             "q_proj", "k_proj", "v_proj", "o_proj",
             "gate_proj", "up_proj", "down_proj",
         ],
-        lora_alpha=32,
+        lora_alpha=lora_rank,  # Set alpha equal to rank (common practice)
         lora_dropout=0,
         bias="none",
         use_gradient_checkpointing="unsloth",
@@ -48,6 +49,7 @@ def load_model_and_tokenizer(
     )
 
     print("✅ Model loaded with QLoRA configuration")
+    print(f"   LoRA rank: {lora_rank}")
 
     if torch.cuda.is_available():
         memory_allocated = torch.cuda.memory_allocated(0) / 1024**3
@@ -116,6 +118,7 @@ def train(
     weight_decay=0.01,
     logging_steps=1,
     save_steps=50,
+    lora_rank=32,
 ):
     """Execute fine-tuning"""
 
@@ -131,12 +134,14 @@ def train(
     print(f"Effective batch size: {batch_size * gradient_accumulation_steps}")
     print(f"Learning rate: {learning_rate}")
     print(f"Epochs: {num_train_epochs}")
+    print(f"LoRA rank: {lora_rank}")
     print("=" * 60 + "\n")
 
     # Load model and tokenizer
     model, tokenizer = load_model_and_tokenizer(
         model_name=model_name,
         max_seq_length=max_seq_length,
+        lora_rank=lora_rank,
     )
 
     # Load dataset
@@ -318,6 +323,7 @@ if __name__ == "__main__":
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
     parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
     parser.add_argument("--epochs", type=int, default=3, help="Number of epochs")
+    parser.add_argument("--lora-rank", type=int, default=32, help="LoRA rank (higher = more parameters)")
     parser.add_argument("--test", action="store_true", help="Test model after training")
 
     args = parser.parse_args()
@@ -332,6 +338,7 @@ if __name__ == "__main__":
         gradient_accumulation_steps=args.grad_accum,
         learning_rate=args.lr,
         num_train_epochs=args.epochs,
+        lora_rank=args.lora_rank,
     )
 
     # Test if requested
