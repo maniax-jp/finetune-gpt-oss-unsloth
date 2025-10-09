@@ -31,6 +31,7 @@ outputs/
 checkpoints/
 logs/
 wandb/
+*.log
 
 # Dataset (large files only, keep sample datasets)
 data/
