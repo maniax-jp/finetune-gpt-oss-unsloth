@@ -32,11 +32,12 @@ checkpoints/
 logs/
 wandb/
 
-# Dataset
-dataset/
+# Dataset (large files only, keep sample datasets)
 data/
-*.jsonl
-*.json
+# Allow dataset directory and sample datasets
+!dataset/
+!dataset/*.jsonl
+!dataset/*.json
 
 # Cache
 .cache/
