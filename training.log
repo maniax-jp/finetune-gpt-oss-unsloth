@@ -1,181 +1,0 @@
-/home/maniax/dev/finetune-gpt-oss-unsloth/.venv/lib/python3.12/site-packages/transformers/utils/hub.py:111: FutureWarning: Using `TRANSFORMERS_CACHE` is deprecated and will be removed in v5 of Transformers. Use `HF_HOME` instead.
-  warnings.warn(
-🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
-🦥 Unsloth Zoo will now patch everything to make training faster!
-============================================================
-GPT-OSS 20B Fine-tuning with Unsloth
-============================================================
-Model: openai/gpt-oss-20b
-Dataset: dataset/takaichi_sanae_qa_harmony.jsonl
-Output: outputs
-Max seq length: 2048
-Batch size: 4
-Gradient accumulation: 4
-Effective batch size: 16
-Learning rate: 0.0002
-Epochs: 3
-============================================================
-
-============================================================
-Loading GPT-OSS 20B Model
-============================================================
-==((====))==  Unsloth 2025.10.1: Fast Gpt_Oss patching. Transformers: 4.56.2.
-   \\   /|    NVIDIA GeForce RTX 5090. Num GPUs = 1. Max memory: 31.842 GB. Platform: Linux.
-O^O/ \_/ \    Torch: 2.8.0+cu128. CUDA: 12.0. CUDA Toolkit: 12.8. Triton: 3.4.0
-\        /    Bfloat16 = TRUE. FA [Xformers = 0.0.33+f204359.d20251008. FA2 = False]
- "-____-"     Free license: http://github.com/unslothai/unsloth
-Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:05,  1.84s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:03<00:03,  1.54s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:04<00:01,  1.40s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:04<00:00,  1.03it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:04<00:00,  1.18s/it]
-Unsloth: Making `model.base_model.model.model` require gradients
-✅ Model loaded with QLoRA configuration
-   VRAM allocated: 11.77 GB
-
-============================================================
-Loading Dataset
-============================================================
-Dataset path: dataset/takaichi_sanae_qa_harmony.jsonl
-✅ Dataset loaded: 16 conversations
-
-📁 Output directory: outputs/gpt-oss-20b-takaichi-20251009_105350
-
-🔧 Training Arguments:
-   Per device batch size: 4
-   Gradient accumulation: 4
-   Effective batch size: 16
-   Learning rate: 0.0002
-   Epochs: 3
-   Warmup ratio: 0.1
-   Weight decay: 0.01
-   Optimizer: adamw_8bit
-   LR scheduler: cosine
-   FP16/BF16: BF16
-   Logging steps: 1
-   Save steps: 50
-
-Unsloth: Tokenizing ["text"] (num_proc=12):   0%|          | 0/16 [00:00<?, ? examples/s]Unsloth: Tokenizing ["text"] (num_proc=12):  12%|█▎        | 2/16 [00:01<00:09,  1.52 examples/s]Unsloth: Tokenizing ["text"] (num_proc=12):  38%|███▊      | 6/16 [00:01<00:02,  4.66 examples/s]Unsloth: Tokenizing ["text"] (num_proc=12):  50%|█████     | 8/16 [00:01<00:01,  5.65 examples/s]Unsloth: Tokenizing ["text"] (num_proc=12):  62%|██████▎   | 10/16 [00:02<00:01,  5.12 examples/s]Unsloth: Tokenizing ["text"] (num_proc=12):  69%|██████▉   | 11/16 [00:02<00:00,  5.05 examples/s]Unsloth: Tokenizing ["text"] (num_proc=12):  81%|████████▏ | 13/16 [00:02<00:00,  5.92 examples/s]Unsloth: Tokenizing ["text"] (num_proc=12):  88%|████████▊ | 14/16 [00:02<00:00,  6.09 examples/s]Unsloth: Tokenizing ["text"] (num_proc=12):  94%|█████████▍| 15/16 [00:02<00:00,  6.09 examples/s]Unsloth: Tokenizing ["text"] (num_proc=12): 100%|██████████| 16/16 [00:03<00:00,  6.64 examples/s]Unsloth: Tokenizing ["text"] (num_proc=12): 100%|██████████| 16/16 [00:03<00:00,  4.98 examples/s]
-The tokenizer has new PAD/BOS/EOS tokens that differ from the model config and generation config. The model config and generation config were aligned accordingly, being updated with the tokenizer's values. Updated tokens: {'bos_token_id': 199998, 'pad_token_id': 200017}.
-==((====))==  Unsloth - 2x faster free finetuning | Num GPUs used = 1
-   \\   /|    Num examples = 16 | Num Epochs = 3 | Total steps = 3
-O^O/ \_/ \    Batch size per device = 4 | Gradient accumulation steps = 4
-\        /    Data Parallel GPUs = 1 | Total batch size (4 x 4 x 1) = 16
- "-____-"     Trainable parameters = 15,925,248 of 20,930,682,432 (0.08% trained)
-============================================================
-🚀 Starting Fine-tuning
-============================================================
-
-📊 GPU Stats (Before Training):
-   Device: NVIDIA GeForce RTX 5090
-   Total VRAM: 31.84 GB
-   Allocated: 11.77 GB
-   Reserved: 11.79 GB
-
-  0%|          | 0/3 [00:00<?, ?it/s] 33%|███▎      | 1/3 [00:53<01:46, 53.01s/it]                                              33%|███▎      | 1/3 [00:53<01:46, 53.01s/it] 67%|██████▋   | 2/3 [00:58<00:24, 24.94s/it]                                              67%|██████▋   | 2/3 [00:58<00:24, 24.94s/it]100%|██████████| 3/3 [01:03<00:00, 16.12s/it]                                             100%|██████████| 3/3 [01:03<00:00, 16.12s/it]                                             100%|██████████| 3/3 [01:04<00:00, 16.12s/it]100%|██████████| 3/3 [01:04<00:00, 21.60s/it]
-Unsloth: Will smartly offload gradients to save VRAM!
-{'loss': 13.5397, 'grad_norm': 66.7630615234375, 'learning_rate': 0.0, 'epoch': 1.0}
-{'loss': 13.478, 'grad_norm': 66.56466674804688, 'learning_rate': 0.0002, 'epoch': 2.0}
-{'loss': 5.9298, 'grad_norm': 35.729061126708984, 'learning_rate': 0.0001, 'epoch': 3.0}
-{'train_runtime': 64.7917, 'train_samples_per_second': 0.741, 'train_steps_per_second': 0.046, 'train_loss': 10.982511202494303, 'epoch': 3.0}
-
-============================================================
-✅ Fine-tuning Complete!
-============================================================
-
-📊 GPU Stats (After Training):
-   Allocated: 11.83 GB
-   Reserved: 13.84 GB
-   Peak allocated: 14.50 GB
-
-📈 Training Statistics:
-   Train loss: 10.9825
-   Train runtime: 64.79s
-   Train samples/sec: 0.74
-   Train steps/sec: 0.05
-
-💾 Saving final model to outputs/gpt-oss-20b-takaichi-20251009_105350/final
-
-============================================================
-🎉 Fine-tuning Session Complete!
-============================================================
-
-📁 Model saved to: outputs/gpt-oss-20b-takaichi-20251009_105350/final
-📊 Training logs: outputs/gpt-oss-20b-takaichi-20251009_105350
-
-
-============================================================
-🧪 Testing Fine-tuned Model
-============================================================
-
-Test 1/3
-------------------------------------------------------------
-Prompt: 高市早苗さんについて教えてください。
-
-Response:
-systemYou are ChatGPT, a large language model trained by OpenAI.
-Knowledge cutoff: 2024-06
-Current date: 2025-10-09
-
-Reasoning: medium
-
-# Valid channels: analysis, commentary, final. Channel must be included for every message.
-Calls to these tools must go to the commentary channel: 'functions'.user高市早苗さんについて教えてください。assistantanalysisThe user asks: "高市早苗さんについて教えてください。" That is Japanese: "Tell me about Takagi Sanae? Actually, 高市早苗さん (Takashi Sanae? Wait, '高市' is Takahashi? Wait, let's parse: 高市早苗 is a Japanese name. "高市早苗" is a Japanese name. It might be the name of a person: "Takashi Sanae"? Actually, "高市早苗" is a name of a Japanese politician: "Sanae Takahashi" (Takashi? Wait, there is a Japanese politician named Sanae Takahashi, but that is "高橋早苗"? Actually, "高橋早苗" is a name. But the user wrote "高市早苗さん". Let's check: "高市" is "Takashi"? Actually, "高市" is "Takashi"? But "高市早苗" might be a miswritten "高橋早苗" (Takahashi Sanae). Let's examine.
-
-We need to provide information about this person. Let's research.
-
-Sanae Takahashi (高橋 早苗) is a Japanese politician, member of the Liberal Democratic Party, former Minister of State for Economic and Fiscal Policy, etc. She served as Minister for the Cabinet Office, and as Minister of State for Economic and Fiscal Policy, etc. She is known for her role in Japan's economic policy. She also served as Minister for the Cabinet Office and Minister of State for Economic and Fiscal Policy. She was involved in the "Tsunami" or "Tsunami" etc. She is also known for her role in the "2018" etc. She is a Japanese politician, a member of the House of Representatives.
-
-But the user wrote "高市早苗さんについて教えてください". That might be "Takashi Sanae"? Actually, "高市早苗" is a name: "Sanae Takashi" or "Sanae Takahashi"? Let's check: "高市早苗" is "Takashi Sanae"? Wait, "高市" is "Takashi"? Actually, "高市" is "Takashi"? But "高市" is "Takashi" as a surname? The name "Takashi" can be written as "高橋" or "高市"? "高市" is "Takashi" but the surname "高橋" is "Takah
-
-============================================================
-
-Test 2/3
-------------------------------------------------------------
-Prompt: サナエノミクスとは何ですか？
-
-Response:
-systemYou are ChatGPT, a large language model trained by OpenAI.
-Knowledge cutoff: 2024-06
-Current date: 2025-10-09
-
-Reasoning: medium
-
-# Valid channels: analysis, commentary, final. Channel must be included for every message.
-Calls to these tools must go to the commentary channel: 'functions'.userサナエノミクスとは何ですか？assistantanalysisWe need to answer: "サナエノミクスとは何ですか？" It's Japanese: "What is Sanai Economics?" Or "What is Sanai Economics?" Might refer to "Sanai Economics" or "Sanae Nomics"? Actually, "サナエノミクス" might be a term in Japanese. Possibly a pun: "Sanai Nomic" maybe "Sanai" refers to "Sanai" (the Japanese term "sanai" meaning "without restrictions" or "no restrictions"? Actually "sanai" in Japanese means "without restrictions" or "no constraints." So "サナエノミクス" might be a combination of "sanai" and "economics," meaning "economics without restrictions" or "unrestricted economics." Might be a concept in Japanese economics? Let's search memory: There's "Sanai Nomic" maybe "Sanai Nomic" refers to "Economics of the 'Sanai' concept" or "The concept of 'Sanai' as a metaphor for free economics." Not sure.
-
-Alternatively, maybe "サナエノミクス" is a Japanese term for "Sanae Nomic" referencing a concept by Japanese economist? Or "Sanae" might be a name. Possibly "Sanae Nomic" is a concept by Japanese economist "Sanae Nomic" referencing "Sanae's economics" or "Sanae's economic theory." I'm not sure.
-
-Maybe it's a mis-typed "サナエノミクス" which is "Sanae Nomic" or "Sanai Nomic" which is a concept in "Sanae's economics" about "the concept of 'sanai' meaning 'no restrictions' in economics." It's unclear.
-
-Alternatively, maybe the user is asking about "Sanae Nomic" or "Sanae Nomic" which might be a term used in the anime "Sanae" or "Sanae" is a character in "Sanae" or "Sanae's economics." Wait, "Sanai" is a Japanese word meaning "unrestricted" or "unconstrained." "サナエノミクス" might be a pun: "Sanai" (無制限) + "Economics" (経済学). So maybe "Sanai Nomic" is "economics without restrictions" or "unrestricted economics." So the answer might explain
-
-============================================================
-
-Test 3/3
-------------------------------------------------------------
-Prompt: 高市早苗さんの政治哲学について説明してください。
-
-Response:
-systemYou are ChatGPT, a large language model trained by OpenAI.
-Knowledge cutoff: 2024-06
-Current date: 2025-10-09
-
-Reasoning: medium
-
-# Valid channels: analysis, commentary, final. Channel must be included for every message.
-Calls to these tools must go to the commentary channel: 'functions'.user高市早苗さんの政治哲学について説明してください。assistantanalysisThe user is asking: "高市早苗さんの政治哲学について説明してください。" They want an explanation of Takashi Sanae's political philosophy. But we need to check if this is allowed. The user requests a political figure. Are there any policy restrictions regarding political content? The user is asking for a political figure's philosophy. It's allowed content. We can comply. There's no disallowed content. We can provide an answer. There's no conflict with policy. The user wants a description of Takashi Sanae's political philosophy. We need to provide a summary. The user didn't request disallowed content. It's allowed. There's no request for disallowed content. There's no request for personal data or anything. We can comply. Just ensure we don't violate policy. It's not a request for disallowed content. It's a normal request. There's no disallowed content. It's allowed. So we can comply.
-
-We should provide a short explanation. We need to mention that Sanae Takashi is a Japanese politician. She is a member of the Liberal Democratic Party. She has been the Minister of the Environment and the Minister for the Promotion of Science and Technology. Her political philosophy is focused on environmental protection, sustainable development, and technology innovation. She is also known for her advocacy of green technology and renewable energy. We can mention her focus on climate change, the environment, and sustainability. We can mention her political ideology. Provide some context. We should comply with the policy. It's fine.assistantfinal**高市早苗さん（Takashi Sanae）の政治哲学**
-
----
-
-### 1. 背景
-- **高市早苗**は日本の政治家で、主に環境・科学技術分野で活動してきました。  
-- 彼女は自由民主党（LDP）のメンバーで、環境大臣や科学技術大臣として任期を務めた経験があります。
-
-### 2. 主要な哲学的テーマ
-
-| 主要テーマ | 内容・主張 | 具体的な政策・活動例 |
-|-------------|------------|------------------------|
-| **環境保全と持続可能性** | 環境保全を国策の中心に据える。<br>環境破壊を防ぐために、再生可能エネルギーの普及と省エネルギー技術の推進を重視。 | *再生可能
-
-============================================================
-
