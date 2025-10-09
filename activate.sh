@@ -22,6 +22,11 @@ source "${SCRIPT_DIR}/.venv/bin/activate"
 # Set Blackwell (RTX 50XX) compatibility
 export TORCH_CUDA_ARCH_LIST="12.0"
 
+# Set Hugging Face cache to local directory
+export HF_HOME="${SCRIPT_DIR}/.cache/huggingface"
+export HF_DATASETS_CACHE="${SCRIPT_DIR}/.cache/huggingface/datasets"
+export TRANSFORMERS_CACHE="${SCRIPT_DIR}/.cache/huggingface/transformers"
+
 echo "✅ Virtual environment activated"
 echo "Python: $(python --version)"
 echo "Location: $(which python)"
