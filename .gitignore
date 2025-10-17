@@ -33,6 +33,9 @@ logs/
 wandb/
 *.log
 
+# Exported model artifacts (large files)
+exported_models/
+
 # Dataset (large files only, keep sample datasets)
 data/
 # Allow dataset directory and sample datasets
