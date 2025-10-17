@@ -368,3 +368,425 @@ ollama run gpt-oss-20b-finetuned "複雑な推論が必要な質問"
 3. ファインチューニング用データセットの準備開始
 4. 小規模データセットでのテストラン実施
 5. 本番データセットでの完全なファインチューニング実行
+
+---
+
+## Phase 8: 性能改善計画（第2次ファインチューニング）
+
+### 8.1 第1次ファインチューニングの結果分析
+
+**実施内容:**
+- データセット: 101サンプル（高市早苗QA）
+- トレーニング: 20 epochs
+- LoRA設定: rank=64, lr=1e-4
+- 損失: 12.73 → 0.355 (97.2%改善)
+
+**問題点:**
+1. **知識の注入不足**: モデルが空の応答を返す、または無関係な内容を生成
+2. **訓練データ量の不足**: 101サンプル × 20エポック = 2,020学習ステップでは不十分
+3. **RLHF未実施**: 人間のフィードバックによる調整が欠如
+
+### 8.2 改善戦略
+
+#### 戦略1: データセット拡充
+
+**目標:** 101サンプル → 300-500サンプル（3-5倍増）
+
+**アプローチA: 既存データの拡張**
+```python
+# 既存QAペアから派生パターンを生成
+expansion_strategies = {
+    "paraphrase": "質問を別の言い方で表現",
+    "detail_levels": "詳細度を変えた質問（簡潔版/詳細版）",
+    "context_variation": "文脈を変えた質問",
+    "follow_up": "フォローアップ質問を追加",
+    "multi_turn": "単発QAを複数ターンの会話に変換"
+}
+```
+
+**具体例:**
+```json
+// 元データ
+{"Q": "高市早苗さんは何党ですか？", "A": "自由民主党（自民党）です"}
+
+// 拡張パターン
+[
+  {"Q": "高市早苗氏の所属政党は？", "A": "自由民主党（自民党）です"},
+  {"Q": "高市早苗さんってどこの政党？", "A": "自由民主党（自民党）に所属しています"},
+  {"Q": "高市早苗議員の政党について教えて", "A": "自由民主党（自民党）の所属議員です"},
+  // マルチターン会話
+  {
+    "messages": [
+      {"role": "user", "content": "高市早苗さんについて教えて"},
+      {"role": "assistant", "content": "高市早苗氏は自由民主党所属の政治家です。"},
+      {"role": "user", "content": "何党ですか？"},
+      {"role": "assistant", "content": "自由民主党（自民党）です"}
+    ]
+  }
+]
+```
+
+**アプローチB: 新規データ収集**
+- Wikipedia、公式サイト、ニュース記事から追加情報を抽出
+- 経歴、政策、発言、実績などのカテゴリー別に体系的に収集
+- ファクトチェック済みの信頼できる情報源のみ使用
+
+**データ品質基準:**
+1. 事実の正確性（公式情報源で検証可能）
+2. 多様性（カテゴリー、質問パターン、回答スタイル）
+3. バランス（各トピックをほぼ均等にカバー）
+4. 文脈の一貫性（会話として自然な流れ）
+
+**実装スクリプト例:**
+```python
+# scripts/augment_dataset.py
+import json
+from typing import List, Dict
+
+def paraphrase_question(q: str, a: str) -> List[Dict]:
+    """質問のパラフレーズを生成"""
+    variations = []
+    # 疑問詞の変換
+    patterns = [
+        (q, a),
+        (q.replace("何", "どの"), a),
+        (q.replace("ですか", "でしょうか"), a),
+        (q + "について教えて", a),
+    ]
+    return [{"Q": q_var, "A": a_var} for q_var, a_var in patterns]
+
+def create_multi_turn(qa_pairs: List[Dict]) -> Dict:
+    """複数のQAペアをマルチターン会話に変換"""
+    messages = []
+    for qa in qa_pairs:
+        messages.append({"role": "user", "content": qa["Q"]})
+        messages.append({"role": "assistant", "content": qa["A"]})
+    return {"messages": messages}
+
+# 使用例
+original_dataset = load_json("data/takaichi_qa.json")
+augmented_dataset = []
+
+for item in original_dataset:
+    # 元データ追加
+    augmented_dataset.append(item)
+
+    # パラフレーズ追加
+    augmented_dataset.extend(paraphrase_question(item["Q"], item["A"]))
+
+# 目標: 101 × 3 = 303サンプル（最低）
+```
+
+#### 戦略2: RLHF (Reinforcement Learning from Human Feedback) 実装
+
+**目標:** 人間のフィードバックに基づくモデルの調整
+
+**Phase 8.3: Reward Modelの構築**
+
+```python
+# scripts/build_reward_model.py
+from unsloth import FastLanguageModel
+from trl import RewardTrainer
+from transformers import TrainingArguments
+
+# ステップ1: 比較データセット作成
+comparison_dataset = [
+    {
+        "prompt": "高市早苗さんは何党ですか？",
+        "chosen": "自由民主党（自民党）です。",  # 良い回答
+        "rejected": "区に位置するこの施設は..."  # 悪い回答（実際の出力）
+    },
+    # 50-100サンプル収集
+]
+
+# ステップ2: Reward Modelトレーニング
+reward_model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name="outputs/gpt-oss-20b-takaichi-20251009_200301/final",
+    max_seq_length=2048,
+    dtype=None,
+    load_in_4bit=True,
+)
+
+reward_model = FastLanguageModel.get_peft_model(
+    reward_model,
+    r=32,  # Reward modelは高いrankを使用
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    lora_alpha=32,
+)
+
+reward_trainer = RewardTrainer(
+    model=reward_model,
+    tokenizer=tokenizer,
+    train_dataset=comparison_dataset,
+    args=TrainingArguments(
+        per_device_train_batch_size=1,
+        num_train_epochs=3,
+        learning_rate=5e-5,
+        output_dir="outputs/reward_model",
+    ),
+)
+
+reward_trainer.train()
+```
+
+**Phase 8.4: PPO (Proximal Policy Optimization) ファインチューニング**
+
+```python
+# scripts/ppo_training.py
+from trl import PPOTrainer, PPOConfig
+from unsloth import FastLanguageModel
+
+# ステップ1: モデルロード
+policy_model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name="outputs/gpt-oss-20b-takaichi-20251009_200301/final",
+    max_seq_length=2048,
+    load_in_4bit=True,
+)
+
+# ステップ2: PPO設定
+ppo_config = PPOConfig(
+    model_name="gpt-oss-takaichi-ppo",
+    learning_rate=1e-5,
+    batch_size=8,
+    mini_batch_size=2,
+    ppo_epochs=4,
+    remove_unused_columns=False,
+)
+
+# ステップ3: PPOトレーナー
+ppo_trainer = PPOTrainer(
+    config=ppo_config,
+    model=policy_model,
+    tokenizer=tokenizer,
+    reward_model=reward_model,  # 前ステップで訓練したモデル
+)
+
+# ステップ4: トレーニング
+prompts = [item["prompt"] for item in comparison_dataset]
+for epoch in range(10):
+    for prompt in prompts:
+        # 生成
+        response = ppo_trainer.generate(prompt)
+        # 報酬計算
+        reward = reward_model(prompt, response)
+        # PPO更新
+        ppo_trainer.step([prompt], [response], [reward])
+```
+
+**Phase 8.5: DPO (Direct Preference Optimization) 実装（代替アプローチ）**
+
+PPOより簡単で安定したアプローチ:
+
+```python
+# scripts/dpo_training.py
+from unsloth import FastLanguageModel, is_bfloat16_supported
+from trl import DPOTrainer, DPOConfig
+
+# DPO用データセット（比較データ）
+dpo_dataset = [
+    {
+        "prompt": "高市早苗さんは何党ですか？",
+        "chosen": "自由民主党（自民党）です。",
+        "rejected": "区に位置するこの施設は、近隣の住民に..."
+    },
+    # 100-200サンプル
+]
+
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name="outputs/gpt-oss-20b-takaichi-20251009_200301/final",
+    max_seq_length=2048,
+    load_in_4bit=True,
+)
+
+model = FastLanguageModel.get_peft_model(
+    model,
+    r=64,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"],
+    lora_alpha=64,
+    use_gradient_checkpointing="unsloth",
+)
+
+dpo_trainer = DPOTrainer(
+    model=model,
+    ref_model=None,  # DPOは参照モデルを自動作成
+    args=DPOConfig(
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=4,
+        warmup_ratio=0.1,
+        num_train_epochs=3,
+        learning_rate=5e-6,
+        fp16=not is_bfloat16_supported(),
+        bf16=is_bfloat16_supported(),
+        logging_steps=1,
+        optim="adamw_8bit",
+        weight_decay=0.0,
+        lr_scheduler_type="linear",
+        seed=42,
+        output_dir="outputs/dpo",
+    ),
+    beta=0.1,  # DPO温度パラメータ
+    train_dataset=dpo_dataset,
+    tokenizer=tokenizer,
+    max_length=2048,
+    max_prompt_length=1024,
+)
+
+dpo_trainer.train()
+```
+
+#### 戦略3: ハイブリッドアプローチ（推奨）
+
+**3段階トレーニングパイプライン:**
+
+1. **SFT (Supervised Fine-Tuning)**: 拡張データセット300-500サンプルで基礎学習
+2. **DPO**: 100-200の比較データで好みの調整
+3. **評価と反復**: テスト → フィードバック → 再訓練
+
+```python
+# scripts/hybrid_training_pipeline.py
+
+# ステージ1: SFT（20-30 epochs）
+sft_trainer = SFTTrainer(
+    model=base_model,
+    train_dataset=augmented_dataset,  # 300-500サンプル
+    max_steps=None,
+    num_train_epochs=25,
+    # ... その他の設定
+)
+sft_model = sft_trainer.train()
+
+# ステージ2: DPO（3-5 epochs）
+dpo_trainer = DPOTrainer(
+    model=sft_model,
+    train_dataset=preference_dataset,  # 100-200比較サンプル
+    num_train_epochs=3,
+    # ... その他の設定
+)
+final_model = dpo_trainer.train()
+
+# ステージ3: 評価
+test_prompts = [...]
+for prompt in test_prompts:
+    response = generate(final_model, prompt)
+    score = human_evaluate(response)
+    # スコアが低い場合は再訓練
+```
+
+### 8.3 実装ロードマップ
+
+**Week 1-2: データセット拡充**
+- [ ] 既存101サンプルの分析とカテゴリー分類
+- [ ] パラフレーズツールの実装
+- [ ] 新規データ収集（Wikipedia、公式サイト）
+- [ ] データ品質検証とクリーニング
+- [ ] 目標300サンプル達成
+
+**Week 3: 第2次SFTトレーニング**
+- [ ] 拡張データセットでSFT実施（25-30 epochs）
+- [ ] 学習曲線のモニタリング
+- [ ] 中間チェックポイントの評価
+
+**Week 4: 比較データセット作成**
+- [ ] モデル出力の収集（50質問）
+- [ ] 良い回答/悪い回答のペア作成（100-200ペア）
+- [ ] 人間評価者によるレビュー
+
+**Week 5: DPO/PPOトレーニング**
+- [ ] DPO実装とトレーニング（3-5 epochs）
+- [ ] または PPO実装（より高度）
+- [ ] ハイパーパラメータチューニング
+
+**Week 6: 評価と反復**
+- [ ] 包括的なテストスイート実行
+- [ ] 人間評価（複数評価者）
+- [ ] 必要に応じて再訓練
+- [ ] 最終モデルのOllamaエクスポート
+
+### 8.4 評価指標
+
+**自動評価:**
+- Perplexity（困惑度）
+- BLEU/ROUGE scores（参照回答との類似度）
+- 応答生成率（空応答の割合）
+
+**人間評価:**
+- 事実正確性（1-5点）
+- 関連性（1-5点）
+- 流暢さ（1-5点）
+- 有用性（1-5点）
+
+```python
+# scripts/evaluation.py
+evaluation_criteria = {
+    "factual_accuracy": "回答は事実に基づいているか",
+    "relevance": "質問に適切に答えているか",
+    "fluency": "自然な日本語か",
+    "helpfulness": "ユーザーにとって有用か"
+}
+
+test_set = [
+    {"question": "高市早苗さんは何党ですか？",
+     "expected": "自由民主党（自民党）です"},
+    # 50-100テストケース
+]
+
+def evaluate_model(model, test_set):
+    scores = {"accuracy": [], "relevance": [], "fluency": [], "helpfulness": []}
+
+    for item in test_set:
+        response = generate(model, item["question"])
+
+        # 人間評価（またはGPT-4評価）
+        scores["accuracy"].append(rate_accuracy(response, item["expected"]))
+        scores["relevance"].append(rate_relevance(response, item["question"]))
+        scores["fluency"].append(rate_fluency(response))
+        scores["helpfulness"].append(rate_helpfulness(response))
+
+    return {k: sum(v)/len(v) for k, v in scores.items()}
+```
+
+### 8.5 期待される改善効果
+
+**改善前（第1次ファインチューニング）:**
+- データ: 101サンプル
+- 応答品質: 空応答 or 無関係な内容
+- 事実正確性: 0%
+
+**改善後（第2次ファインチューニング + RLHF）:**
+- データ: 300-500サンプル + 100-200比較ペア
+- 応答品質: 一貫した高品質な回答
+- 事実正確性: 80-90%（目標）
+- 応答生成率: 100%（空応答なし）
+
+### 8.6 リスクと対策
+
+**リスク1: データ収集の労力**
+- 対策: 半自動化ツールの活用、段階的拡張（まず200サンプル）
+
+**リスク2: VRAM不足（RLHF時）**
+- 対策: DPOを優先（PPOより軽量）、バッチサイズ調整
+
+**リスク3: 過学習**
+- 対策: validation setの設定、early stopping
+
+**リスク4: データ品質の低下**
+- 対策: 厳密なレビュープロセス、ファクトチェック
+
+### 8.7 次のステップ
+
+1. **即座に実行可能:**
+   - 既存101サンプルのパラフレーズによる拡張（→303サンプル）
+   - 第2次SFTトレーニング実施
+
+2. **短期（1-2週間）:**
+   - 新規データ収集で300-500サンプルへ拡大
+   - 比較データセット作成開始
+
+3. **中期（3-4週間）:**
+   - DPOトレーニング実施
+   - 包括的評価と反復改善
+
+4. **長期（オプション）:**
+   - RAG (Retrieval-Augmented Generation) との統合検討
+   - より大規模なデータセット（1000+サンプル）への拡張
