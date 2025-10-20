@@ -190,14 +190,10 @@ def generate_response(model, tokenizer, question: str) -> str:
             eos_token_id=tokenizer.eos_token_id,
         )
 
-    # デコード
-    full_output = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-    # アシスタントの応答部分のみ抽出
-    if "<|assistant|>" in full_output:
-        response = full_output.split("<|assistant|>")[-1].strip()
-    else:
-        response = full_output[len(prompt):].strip()
+    # デコード（入力部分をスキップ）
+    input_length = inputs['input_ids'].shape[1]
+    generated_ids = outputs[0][input_length:]
+    response = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
     return response
 
