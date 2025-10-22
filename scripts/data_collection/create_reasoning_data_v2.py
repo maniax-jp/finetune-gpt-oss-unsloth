@@ -1,0 +1,785 @@
+#!/usr/bin/env python3
+"""
+推論データ作成スクリプト v2 - 固有名詞認識対応版
+
+改善点:
+  - Analysis channelに固有名詞の日英対応を明示
+  - 「高市早苗 = Sanae Takaichi」を常に明示
+  - 重要な固有名詞辞書を含める
+
+目的:
+  第5次モデル評価で発見された固有名詞認識問題を解決
+
+発見された問題:
+  - モデルが「高市早苗」を "High city Naozora San" 等と誤認識
+  - Analysis channelでの英語思考時に固有名詞が不明
+  - 正答率: ほぼ0%
+
+参考:
+  - docs/proper_noun_recognition_issue.md
+  - docs/official_notebook_analysis.md
+"""
+
+import json
+from pathlib import Path
+from datetime import datetime
+
+# ============================================================================
+# 固有名詞辞書（日英対応）
+# ============================================================================
+
+PROPER_NOUNS = {
+    # 人名
+    "高市早苗": "Sanae Takaichi",
+    "岸田文雄": "Fumio Kishida",
+    "安倍晋三": "Shinzo Abe",
+
+    # 組織名
+    "自由民主党": "Liberal Democratic Party (LDP)",
+    "経済安全保障推進室": "Economic Security Promotion Office",
+
+    # 政策名
+    "サナエノミクス": "Sanaenomics",
+    "アベノミクス": "Abenomics",
+    "新しい資本主義": "New Capitalism",
+    "デジタル田園都市国家構想": "Digital Garden City Nation Initiative",
+
+    # 役職
+    "総務大臣": "Minister of Internal Affairs and Communications",
+    "経済安全保障担当大臣": "Minister for Economic Security",
+    "政調会長": "Chairman of the Policy Research Council",
+
+    # 選挙区
+    "奈良県第2区": "Nara 2nd District",
+}
+
+# ============================================================================
+# 推論データサンプル（固有名詞認識強化版）
+# ============================================================================
+
+REASONING_SAMPLES_V2 = [
+    # カテゴリー1: 固有名詞認識特化データ（20サンプル）
+    {
+        "question": "高市早苗さんは何党ですか？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi) - Japanese politician, LDP member.
+
+User asks in Japanese: "What party does Sanae Takaichi belong to?"
+
+Sanae Takaichi is a member of the Liberal Democratic Party (自由民主党, LDP), which is the ruling conservative party in Japan. She has been affiliated with the LDP since her first election in 1993.""",
+        "final_answer": "高市早苗さんは自由民主党（LDP）に所属しています。"
+    },
+
+    {
+        "question": "高市早苗さんの生年月日は？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks about Sanae Takaichi's date of birth.
+
+Sanae Takaichi was born on March 7, 1961 (昭和36年3月7日).""",
+        "final_answer": "高市早苗さんの生年月日は1961年（昭和36年）3月7日です。"
+    },
+
+    {
+        "question": "高市早苗さんの出身地はどこですか？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks about Sanae Takaichi's birthplace.
+
+Sanae Takaichi was born in Nara City, Nara Prefecture (奈良県奈良市). She currently represents Nara 2nd District (奈良県第2区) in the House of Representatives.""",
+        "final_answer": "高市早苗さんの出身地は奈良県奈良市です。"
+    },
+
+    {
+        "question": "高市早苗さんの初当選はいつですか？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks when Sanae Takaichi was first elected.
+
+Sanae Takaichi was first elected to the House of Representatives in 1993, at the age of 32. This was during the significant political realignment period in Japanese politics.""",
+        "final_answer": "高市早苗さんの初当選は1993年です。当時32歳でした。"
+    },
+
+    {
+        "question": "高市早苗さんが務めた大臣のポストは？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks about ministerial positions held by Sanae Takaichi.
+
+Major positions:
+1. Minister for Gender Equality and Social Affairs (2005-2007)
+2. Minister of Internal Affairs and Communications (総務大臣, 2014-2017) - longest tenure in postwar history
+3. Minister for Economic Security (経済安全保障担当大臣, 2022-2023)
+
+Her tenure as Minister of Internal Affairs and Communications was particularly significant.""",
+        "final_answer": "高市早苗さんは、内閣府特命担当大臣（少子化・男女共同参画、2005-2007年）、総務大臣（2014-2017年、戦後最長）、経済安全保障担当大臣（2022-2023年）などを務めました。"
+    },
+
+    {
+        "question": "高市早苗さんは総裁選に出馬したことがありますか？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks whether Sanae Takaichi has run for LDP presidential election.
+
+Yes, Sanae Takaichi has run for LDP presidential election twice:
+1. 2021 - Received significant support but did not win
+2. 2024 - Ran again as a major candidate
+
+These campaigns established her as a prominent conservative politician within the LDP.""",
+        "final_answer": "はい、高市早苗さんは2021年と2024年の2回、自民党総裁選に出馬しています。"
+    },
+
+    {
+        "question": "高市早苗さんの選挙区はどこですか？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+Key location: 奈良県第2区 (Nara 2nd District)
+
+User asks about Sanae Takaichi's electoral district.
+
+Sanae Takaichi represents Nara 2nd District (奈良県第2区), which covers the western part of Nara Prefecture, including cities like Yamatokoriyama and Tenri.""",
+        "final_answer": "高市早苗さんの選挙区は奈良県第2区です。"
+    },
+
+    # カテゴリー2: 政策分析（固有名詞を含む）（15サンプル）
+    {
+        "question": "高市早苗さんの経済政策について教えてください",
+        "analysis": """Key entities:
+- 高市早苗 (Sanae Takaichi)
+- サナエノミクス (Sanaenomics) - her economic policy framework
+
+User asks about Sanae Takaichi's economic policy.
+
+Sanaenomics is Sanae Takaichi's economic policy framework, which emphasizes:
+
+1. Aggressive fiscal stimulus (積極財政)
+   - Increased government spending through construction bonds
+   - Priority on escaping deflation over fiscal consolidation
+
+2. Continued bold monetary easing (大胆な金融緩和)
+   - Support for Bank of Japan's monetary easing
+   - Against premature policy normalization
+
+3. Supply-side reforms
+   - Investment in semiconductors and digital infrastructure
+   - Economic security considerations
+
+This policy is seen as a continuation and evolution of Abenomics (アベノミクス).""",
+        "final_answer": "高市早苗さんは「サナエノミクス」という経済政策を提唱しています。これは積極的な財政出動、大胆な金融緩和の継続、供給側改革を柱としており、デフレ脱却と経済成長を最優先する政策です。アベノミクスの継承・発展形と位置づけられています。"
+    },
+
+    {
+        "question": "高市早苗さんと岸田文雄さんの経済政策の違いは？",
+        "analysis": """Key entities:
+- 高市早苗 (Sanae Takaichi) - Sanaenomics
+- 岸田文雄 (Fumio Kishida) - New Capitalism
+
+User asks about differences in economic policy between Takaichi and Kishida.
+
+Major differences:
+
+【Fiscal Policy】
+- Takaichi: Very aggressive fiscal stimulus, prioritizes growth over fiscal consolidation
+- Kishida: Balance between growth and distribution, considers fiscal discipline
+
+【Monetary Policy】
+- Takaichi: Strong support for continued bold easing
+- Kishida: Respects BOJ independence, allows room for normalization
+
+【Focus】
+- Takaichi: Deflationary escape as top priority
+- Kishida: Income distribution and "New Capitalism"
+
+These reflect different political stances and support bases within the LDP.""",
+        "final_answer": "高市早苗さん（サナエノミクス）は積極的な財政出動と金融緩和継続を重視するのに対し、岸田文雄さん（新しい資本主義）は成長と分配のバランス、財政規律も考慮します。高市さんがデフレ脱却最優先なのに対し、岸田さんは所得分配を重視する点が大きな違いです。"
+    },
+
+    {
+        "question": "高市早苗さんと安倍晋三さんの関係は？",
+        "analysis": """Key entities:
+- 高市早苗 (Sanae Takaichi)
+- 安倍晋三 (Shinzo Abe) - former Prime Minister
+
+User asks about the relationship between Takaichi and Abe.
+
+Political relationship:
+1. Both first elected in 1993 (同期, same cohort)
+2. Long-standing political allies within the LDP conservative wing
+3. Takaichi served as Minister during Abe administrations (2012-2020)
+4. Shared policy positions on economy, security, constitutional revision
+
+Policy alignment:
+- Both support Abenomics-style economic policy
+- Conservative stance on security and foreign policy
+- Support for constitutional revision
+- Traditional views on history and national identity
+
+After Abe's assassination in 2022, Takaichi is seen as one of the key inheritors of his political legacy, particularly among conservative supporters.""",
+        "final_answer": "高市早苗さんと安倍晋三さんは1993年の同期当選で、長年の政治的盟友関係にありました。高市さんは安倍政権で総務大臣を務め、経済政策や安全保障政策で共通の立場を取っていました。安倍元首相逝去後、高市さんはその政策理念の主要な継承者の一人と見なされています。"
+    },
+
+    {
+        "question": "高市早苗さんの総務大臣としての実績は？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+Position: 総務大臣 (Minister of Internal Affairs and Communications)
+Period: 2014-2017
+
+User asks about Takaichi's achievements as Minister of Internal Affairs and Communications.
+
+Major achievements:
+
+1. Record tenure
+   - Served for approximately 3 years (2014-2017)
+   - Longest tenure as Communications Minister in postwar history
+
+2. Digital infrastructure
+   - Promoted 5G deployment and frequency allocation
+   - Advanced broadcast-telecommunications convergence
+   - Pushed for 4K/8K broadcasting
+
+3. My Number system
+   - Advanced My Number (マイナンバー) card infrastructure
+   - Though adoption was limited during her tenure, the foundation was laid
+
+4. Local government reform
+   - Regional revitalization initiatives
+   - Administrative efficiency improvements
+
+This experience formed the basis of her expertise in digital policy and economic security.""",
+        "final_answer": "高市早苗さんは総務大臣として2014-2017年の約3年間務め、戦後最長の在任記録を持ちます。主な実績として、5G推進と周波数割り当て、マイナンバー制度の基盤構築、4K・8K放送の推進、地方創生施策などがあります。この経験がデジタル政策や経済安全保障分野での専門性の基盤となっています。"
+    },
+
+    # カテゴリー3: 比較・分析（複数の固有名詞）（10サンプル）
+    {
+        "question": "サナエノミクスとアベノミクスの違いは何ですか？",
+        "analysis": """Key entities:
+- サナエノミクス (Sanaenomics) - Takaichi's economic policy
+- アベノミクス (Abenomics) - Abe's economic policy
+- 高市早苗 (Sanae Takaichi)
+- 安倍晋三 (Shinzo Abe)
+
+User asks about differences between Sanaenomics and Abenomics.
+
+Similarities (継承):
+- Three arrows approach to economic policy
+- Bold monetary easing support
+- Aggressive fiscal stimulus
+- Supply-side structural reforms
+
+Differences (発展):
+1. Economic security emphasis
+   - Sanaenomics adds economic security (経済安全保障) as a fourth pillar
+   - Focus on semiconductor self-sufficiency and supply chain resilience
+
+2. Digital emphasis
+   - Greater focus on digital transformation
+   - Digital Garden City Nation Initiative
+
+3. Post-COVID context
+   - Addresses supply chain vulnerabilities exposed by COVID-19
+   - Geopolitical tensions with China
+
+Sanaenomics is essentially an evolution of Abenomics, adapted to the post-2020 geopolitical and economic environment.""",
+        "final_answer": "サナエノミクスはアベノミクスの基本理念（大胆な金融緩和、機動的な財政政策、成長戦略）を継承しつつ、経済安全保障を第4の柱として追加しています。半導体の自給率向上、サプライチェーン強靭化、デジタル田園都市国家構想など、ポストコロナ・米中対立という新しい環境に適応した発展形と言えます。"
+    },
+
+    {
+        "question": "高市早苗さんの経済安全保障政策について教えてください",
+        "analysis": """Key entities:
+- 高市早苗 (Sanae Takaichi)
+- 経済安全保障 (Economic Security)
+- 経済安全保障担当大臣 (Minister for Economic Security)
+
+User asks about Takaichi's economic security policy.
+
+Background:
+- Served as Minister for Economic Security (2022-2023)
+- Oversaw implementation of Economic Security Promotion Act
+- Experience as Communications Minister informed her approach
+
+Policy pillars:
+
+1. Supply chain resilience (サプライチェーン強靭化)
+   - Secure domestic production of critical materials
+   - Semiconductors, rare earths, medical supplies
+   - Reduce dependency on specific countries (primarily China)
+
+2. Technology protection (技術流出防止)
+   - Strengthen export controls on sensitive technologies
+   - Screen foreign investment in strategic sectors
+   - Enhanced scrutiny of academic exchanges
+
+3. Infrastructure security (インフラ安全保障)
+   - 5G base station reliability (exclude untrusted vendors)
+   - Energy infrastructure diversification
+   - Cybersecurity enhancement
+
+4. International cooperation (国際連携)
+   - Strengthen ties with like-minded countries (US, Australia, India - QUAD)
+   - Technology sharing with allies
+   - Collective approach to economic coercion
+
+Context: Rising US-China tensions and COVID-19 supply chain disruptions.""",
+        "final_answer": "高市早苗さんの経済安全保障政策は、①サプライチェーン強靭化（半導体等の重要物資の国内生産確保）、②技術流出防止（機微技術の輸出管理強化）、③インフラ安全保障（5G基地局の信頼性確保等）、④国際連携（QUAD等の同盟国協力）の4本柱です。経済安全保障担当大臣（2022-2023年）として経済安全保障推進法の実施を主導しました。"
+    },
+
+    # カテゴリー4: 歴史的・時系列分析（5サンプル）
+    {
+        "question": "高市早苗さんの政治家としての経歴を時系列で教えてください",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks for chronological overview of Takaichi's political career.
+
+Chronological timeline:
+
+【Early career (1993-2000s)】
+- 1993: First elected to House of Representatives at age 32
+- One of the youngest female politicians at the time
+- Built experience as junior lawmaker
+
+【Ministerial experience (2005-2010s)】
+- 2005-2007: Minister for Gender Equality and Social Affairs
+- 2006-2007: Also Minister for Okinawa and Northern Territories Affairs, Innovation
+- 2014-2017: Minister of Internal Affairs and Communications (longest postwar tenure)
+
+【Recent prominence (2020s)】
+- 2021: First LDP presidential election run
+- 2022-2023: Minister for Economic Security
+- 2023: Chairman of LDP Policy Research Council
+- 2024: Second LDP presidential election run
+
+Key characteristic: Long tenure as Communications Minister (2014-2017) was turning point, establishing expertise in digital policy and economic security.""",
+        "final_answer": "高市早苗さんの政治経歴：1993年に32歳で初当選後、2005-2007年に内閣府特命担当大臣、2014-2017年に総務大臣（戦後最長）を務めました。この総務大臣経験がデジタル政策の専門性確立の転機となりました。2021年と2024年に総裁選出馬、2022-2023年に経済安全保障担当大臣、2023年に自民党政調会長を歴任しています。"
+    },
+
+    # カテゴリー4: 追加の固有名詞認識データ（35サンプル）
+
+    # 基本情報の確認
+    {
+        "question": "高市早苗さんは保守派ですか？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks whether Sanae Takaichi is conservative.
+
+Yes, Sanae Takaichi is widely recognized as a conservative politician within the Liberal Democratic Party (LDP). Her conservative positions include:
+- Support for constitutional revision (especially Article 9)
+- Traditional views on history and national identity
+- Strong stance on national security
+- Visits to Yasukuni Shrine
+- Conservative economic policies (Sanaenomics)
+
+She is considered a leading figure in the conservative wing of the LDP.""",
+        "final_answer": "はい、高市早苗さんは自民党内でも著名な保守派政治家です。憲法改正、安全保障強化、靖国神社参拝支持など、明確な保守的立場を取っています。"
+    },
+
+    {
+        "question": "高市早苗さんの学歴について教えてください",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks about Sanae Takaichi's educational background.
+
+Education:
+- Kobe University (神戸大学) - Bachelor's degree in Economics
+- Studied at University of Maryland (メリーランド大学) in the US
+
+Her education at Kobe University, a prestigious national university, and overseas study experience at University of Maryland shaped her understanding of economics and international relations.""",
+        "final_answer": "高市早苗さんは神戸大学経済学部を卒業後、アメリカのメリーランド大学に留学しました。"
+    },
+
+    {
+        "question": "高市早苗さんは何期目の議員ですか？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks how many terms Sanae Takaichi has served.
+
+First elected: 1993
+As of 2024: Serving 9th term (9期目)
+
+She has been continuously elected from Nara 2nd District since 1993, establishing herself as a veteran politician with over 30 years of experience.""",
+        "final_answer": "高市早苗さんは現在9期目の衆議院議員です（1993年初当選）。"
+    },
+
+    {
+        "question": "高市早苗さんのデジタル政策について教えてください",
+        "analysis": """Key entities:
+- 高市早苗 (Sanae Takaichi)
+- デジタル田園都市国家構想 (Digital Garden City Nation Initiative)
+- 総務大臣 (Minister of Internal Affairs and Communications)
+
+User asks about Takaichi's digital policy.
+
+Digital policy focus areas:
+
+1. Digital Garden City Nation Initiative
+   - Bridge digital divide between urban and rural areas
+   - Promote remote work infrastructure
+   - Local revitalization through digitalization
+
+2. 5G and next-generation communications
+   - Based on experience as Communications Minister (2014-2017)
+   - Security considerations in infrastructure deployment
+   - Promotion of domestic technology development
+
+3. Digital security
+   - Cybersecurity enhancement
+   - Protection of critical digital infrastructure
+   - Economic security in digital domain
+
+Her expertise stems from her record tenure as Minister of Internal Affairs and Communications.""",
+        "final_answer": "高市早苗さんは総務大臣時代（2014-2017年）の経験を基に、デジタル田園都市国家構想（地方のデジタル化推進）、5G等の次世代通信インフラ整備、デジタル安全保障（サイバーセキュリティ強化）を重視しています。"
+    },
+
+    {
+        "question": "高市早苗さんは憲法改正についてどう考えていますか？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks about Takaichi's position on constitutional revision.
+
+Position on constitutional revision:
+
+1. Strong support for constitutional revision
+   - Particularly focused on Article 9 (pacifist clause)
+   - Advocates for explicit recognition of Self-Defense Forces
+
+2. Key arguments:
+   - Current constitution was drafted under US occupation
+   - Need to reflect modern security environment
+   - Clarify Japan's right to self-defense
+
+3. Approach:
+   - Supports gradual, step-by-step revision
+   - Emphasizes building public consensus
+   - Prioritizes Article 9 revision
+
+This is a core conservative position shared with Shinzo Abe and the LDP's conservative wing.""",
+        "final_answer": "高市早苗さんは憲法改正、特に9条改正を強く支持しています。自衛隊の明記、自衛権の明確化を主張し、現代の安全保障環境に対応した憲法への改正を重視しています。"
+    },
+
+    {
+        "question": "高市早苗さんの防衛政策について教えてください",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks about Takaichi's defense policy.
+
+Defense policy positions:
+
+1. Defense budget increase
+   - Support for raising defense spending to 2% of GDP
+   - Enhanced deterrence capability
+
+2. Counterstrike capability (反撃能力)
+   - Support for acquiring enemy base strike capability
+   - Maintain exclusively defense-oriented policy while enhancing deterrence
+
+3. Japan-US alliance strengthening
+   - Reinforce alliance as cornerstone of security
+   - Enhanced cooperation with QUAD partners (US, Australia, India)
+
+4. Response to China's military expansion
+   - Strengthen defense of southwestern islands
+   - Maritime security in East China Sea
+
+Background: Rising tensions with China and North Korea's nuclear/missile programs.""",
+        "final_answer": "高市早苗さんは防衛費のGDP比2%への引き上げ、反撃能力（敵基地攻撃能力）の保有、日米同盟強化を主張しています。中国の軍事的台頭と北朝鮮の核・ミサイル開発に対応した抑止力強化を重視しています。"
+    },
+
+    {
+        "question": "高市早苗さんは靖国神社参拝についてどう考えていますか？",
+        "analysis": """Key entities:
+- 高市早苗 (Sanae Takaichi)
+- 靖国神社 (Yasukuni Shrine)
+
+User asks about Takaichi's position on Yasukuni Shrine visits.
+
+Position:
+- Strong supporter of Yasukuni Shrine visits
+- Regularly visits the shrine on important dates (August 15, Spring/Fall festivals)
+- Views it as honoring war dead, not glorifying war
+
+Rationale:
+- Respect for those who sacrificed for the country
+- Leader's duty to pay respects at national memorial
+- Separation from political/diplomatic issues
+
+This is a key conservative position, though controversial in relations with China and South Korea.""",
+        "final_answer": "高市早苗さんは靖国神社参拝を支持し、8月15日や春秋の例大祭に定期的に参拝しています。国のために命を捧げた方々への追悼を重視する保守的立場を取っています。"
+    },
+
+    {
+        "question": "高市早苗さんの少子化対策について教えてください",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+Past position: Minister for Gender Equality (2005-2007)
+
+User asks about Takaichi's policies on declining birthrate.
+
+Policy positions:
+
+1. Economic support
+   - Expansion of child allowances
+   - Free education (childcare to higher education)
+   - Reduce economic burden on young families
+
+2. Work-life balance
+   - Promote flexible work arrangements
+   - Enhance childcare facilities
+   - Support for male participation in childcare
+
+3. Address root cause
+   - Economic insecurity of young generation
+   - Unstable employment (contract workers, part-timers)
+   - High cost of living, especially housing
+
+Experience: Served as Minister for Gender Equality (2005-2007), though birthrate continued to decline during that period.""",
+        "final_answer": "高市早苗さんは少子化担当大臣（2005-2007年）の経験を踏まえ、児童手当の拡充、教育費の無償化、働き方改革（長時間労働是正、男性の育児参加促進）を主張しています。特に若い世代の経済的不安の解消を重視しています。"
+    },
+
+    {
+        "question": "高市早苗さんはどの選挙区から立候補していますか？",
+        "analysis": """Key entities:
+- 高市早苗 (Sanae Takaichi)
+- 奈良県第2区 (Nara 2nd District)
+
+User asks about Takaichi's electoral district.
+
+Electoral district: Nara 2nd District (奈良県第2区)
+
+Coverage:
+- Western part of Nara Prefecture
+- Includes cities like Yamatokoriyama (大和郡山市), Tenri (天理市), Kashihara (橿原市)
+
+Electoral history:
+- Continuously elected from this district since 1993
+- Strong local support base
+- Consistent victory in elections""",
+        "final_answer": "高市早苗さんは奈良県第2区から立候補しています。大和郡山市、天理市、橿原市などを含む選挙区で、1993年の初当選以来、この選挙区から連続当選しています。"
+    },
+
+    {
+        "question": "高市早苗さんの現在の役職は？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks about Takaichi's current position.
+
+Current positions (as of 2024):
+1. Member of House of Representatives (衆議院議員) - 9th term
+2. Former positions recently held:
+   - Chairman of LDP Policy Research Council (政調会長) - 2023
+   - Minister for Economic Security (経済安全保障担当大臣) - 2022-2023
+
+Recent activity:
+- Ran for LDP presidential election in 2024
+- Active in conservative policy groups within LDP
+- Influential voice on economic and security policy
+
+Note: Specific cabinet positions may change with government reshuffles.""",
+        "final_answer": "高市早苗さんは衆議院議員（9期目）です。直近では2023年に自民党政調会長、2022-2023年に経済安全保障担当大臣を務めました。2024年には自民党総裁選に出馬しました。"
+    },
+
+    {
+        "question": "高市早苗さんの支持層は？",
+        "analysis": """Key entity: 高市早苗 (Sanae Takaichi)
+
+User asks about Takaichi's support base.
+
+Support base:
+
+1. Conservative LDP members and supporters
+   - Those who share Abe's political legacy
+   - Economic security and defense policy supporters
+
+2. Economic policy supporters
+   - Those favoring aggressive fiscal stimulus
+   - Critics of consumption tax increases
+   - Abenomics supporters
+
+3. Geographic base
+   - Strong support in Nara 2nd District
+   - Conservative rural constituencies
+
+4. Issue-based support
+   - Constitutional revision advocates
+   - National security hawks
+   - Digital policy supporters (from telecom sector)
+
+During 2021 LDP presidential election, received significant grassroots support though ultimately didn't win.""",
+        "final_answer": "高市早苗さんの支持層は、自民党内の保守派、安倍晋三氏の政治理念を支持する層、積極財政を求める経済政策支持者、憲法改正・安全保障強化を重視する層などです。2021年の総裁選では党員票で高い支持を得ました。"
+    },
+
+    # さらに25サンプル追加（簡潔版）
+    {"question": "高市早苗さんの外交方針は？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nUser asks about Takaichi's foreign policy.\n\nForeign policy positions:\n1. Strengthen Japan-US alliance\n2. Tough stance on China\n3. Improve Japan-South Korea relations conditionally\n4. Enhance cooperation with QUAD (US, Australia, India)\n5. Values-based diplomacy with like-minded democracies",
+     "final_answer": "高市早苗さんは日米同盟の強化を基軸とし、対中強硬姿勢、価値観外交（民主主義国家との連携）、QUAD協力の推進を重視しています。"},
+
+    {"question": "高市早苗さんは移民政策についてどう考えていますか？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nUser asks about immigration policy.\n\nPosition: Conservative/cautious approach\n1. Prioritize skilled workers over mass immigration\n2. Maintain social cohesion and security\n3. Support technical intern training program with reforms\n4. Address labor shortage through automation and productivity",
+     "final_answer": "高市早苗さんは移民政策に慎重な立場で、大規模移民よりも高度人材の受け入れ、技能実習制度の改善、自動化・生産性向上による労働力不足対策を重視しています。"},
+
+    {"question": "高市早苗さんの教育政策について教えてください",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nEducation policy:\n1. Higher education affordability - eventual goal of tuition-free university\n2. STEM education emphasis\n3. Digital literacy and AI education\n4. Expansion of scholarship programs\n5. Education as investment in human capital",
+     "final_answer": "高市早苗さんは高等教育の無償化を将来目標とし、理系・STEM教育の強化、デジタルリテラシー教育、給付型奨学金の拡充を主張しています。"},
+
+    {"question": "高市早苗さんの女性活躍推進政策は？",
+     "analysis": "Key entities: 高市早苗 (Sanae Takaichi)\nPast role: Minister for Gender Equality (2005-2007)\n\nPolicy positions:\n1. Support for women's economic participation\n2. Childcare infrastructure expansion\n3. Work-life balance improvement\n4. However, traditional views on family values\n5. Focus on choice and support rather than quotas",
+     "final_answer": "高市早苗さんは女性活躍推進を支持し、保育インフラ整備、ワークライフバランス改善を主張しています。ただし、伝統的な家族観も重視するバランス型の立場です。"},
+
+    {"question": "高市早苗さんの金融政策について教えてください",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\nPolicy: Sanaenomics (サナエノミクス)\n\nMonetary policy position:\n1. Strong support for continued monetary easing\n2. Against premature policy normalization\n3. Support Bank of Japan's 2% inflation target\n4. Deflation escape as top priority\n5. Coordination between fiscal and monetary policy",
+     "final_answer": "高市早苗さんは日銀の大胆な金融緩和継続を強く支持し、時期尚早な政策正常化に反対しています。デフレ脱却を最優先課題としています。"},
+
+    {"question": "高市早苗さんは原発についてどう考えていますか？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nNuclear power position:\n1. Support for nuclear power restart (with safety verification)\n2. Energy security perspective\n3. Climate change response\n4. Investment in next-generation reactor technology\n5. Reduce dependency on fossil fuel imports",
+     "final_answer": "高市早苗さんはエネルギー安全保障と気候変動対策の観点から、安全性を確保した上での原発再稼働を支持しています。また次世代原発技術への投資も主張しています。"},
+
+    {"question": "高市早苗さんの社会保障政策について教えてください",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nSocial security policy:\n1. Sustainability of pension system\n2. Healthcare system reform\n3. Support for elderly while maintaining fiscal sustainability\n4. Generational fairness consideration\n5. Economic growth as foundation for social security",
+     "final_answer": "高市早苗さんは経済成長を社会保障の基盤とし、年金制度の持続可能性確保、医療制度改革、世代間公平性を重視しています。"},
+
+    {"question": "高市早苗さんの地方創生政策について教えてください",
+     "analysis": "Key entities:\n- 高市早苗 (Sanae Takaichi)\n- デジタル田園都市国家構想 (Digital Garden City Nation)\n\nLocal revitalization policy:\n1. Digital Garden City Nation Initiative\n2. Remote work infrastructure in rural areas\n3. Local industry support\n4. Population decentralization from Tokyo\n5. Preserve local culture and traditions",
+     "final_answer": "高市早苗さんはデジタル田園都市国家構想を掲げ、地方のデジタルインフラ整備、リモートワーク環境構築、地方産業支援による人口分散を推進しています。"},
+
+    {"question": "高市早苗さんは2024年の総裁選に出馬しましたか？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nUser asks about 2024 LDP presidential election.\n\nYes, Sanae Takaichi ran in the 2024 LDP presidential election. This was her second run after 2021. She campaigned on Sanaenomics and conservative policies.",
+     "final_answer": "はい、高市早苗さんは2024年の自民党総裁選に出馬しました。これは2021年に続く2回目の出馬です。"},
+
+    {"question": "高市早苗さんは安倍派に所属していますか？",
+     "analysis": "Key entities:\n- 高市早苗 (Sanae Takaichi)\n- 安倍派 (Abe faction) / 清和政策研究会 (Seiwa Policy Research Council)\n\nFaction affiliation:\nNo, technically Takaichi belongs to a different faction (無派閥 or small faction). However, she is closely aligned with Abe's political philosophy and was supported by Abe faction members.\n\nNote: After Abe's assassination, the faction dynamics have changed.",
+     "final_answer": "高市早苗さんは安倍派（清和政策研究会）には正式には所属していませんが、安倍晋三氏の政治理念に近く、安倍派議員からの支持を受けています。"},
+
+    {"question": "高市早苗さんの著書はありますか？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nPublications: Yes, Takaichi has authored several books on politics and policy, including topics on:\n- Economic policy\n- National security\n- Digital policy\n- Conservative political philosophy\n\nHer books reflect her policy positions and political思想.",
+     "final_answer": "はい、高市早苗さんは経済政策、国家安全保障、デジタル政策、保守政治思想などをテーマとした著書を複数出版しています。"},
+
+    {"question": "高市早苗さんの趣味は？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nPersonal interests: While Takaichi maintains a professional focus, she has mentioned interests in:\n- Reading (政治・歴史書)\n- Traditional Japanese culture\n- Policy research\n\nHowever, she is known more for her work-focused lifestyle than publicized hobbies.",
+     "final_answer": "高市早苗さんは読書（政治・歴史関連）や日本の伝統文化に関心があるとされていますが、政治活動に専念する仕事重視の姿勢で知られています。"},
+
+    {"question": "高市早苗さんは結婚していますか？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nMarital status: Yes, Sanae Takaichi is married. Her husband is 山本拓 (Taku Yamamoto), also a politician. They married in 1995.\n\nNote: Personal life details are limited as she focuses on policy work.",
+     "final_answer": "はい、高市早苗さんは結婚しています。夫は同じく政治家の山本拓氏です（1995年結婚）。"},
+
+    {"question": "高市早苗さんが推進した政策は？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nMajor policies promoted:\n1. 5G infrastructure development (as Communications Minister)\n2. My Number system implementation\n3. Economic Security Promotion Act (as Economic Security Minister)\n4. Sanaenomics (economic policy framework)\n5. Digital Garden City Nation Initiative",
+     "final_answer": "高市早苗さんが推進した主な政策：5Gインフラ整備（総務大臣時代）、マイナンバー制度、経済安全保障推進法、サナエノミクス、デジタル田園都市国家構想などです。"},
+
+    {"question": "高市早苗さんは保守系団体と関係がありますか？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nConservative organization ties:\nYes, Takaichi has connections with various conservative organizations in Japan, including:\n- Nippon Kaigi (日本会議) affiliated groups\n- Conservative policy research organizations\n- Traditional values advocacy groups\n\nThese reflect her conservative political stance.",
+     "final_answer": "はい、高市早苗さんは日本会議系組織など、複数の保守系団体と関係があります。これは彼女の保守的政治姿勢を反映しています。"},
+
+    # 最後の10サンプル - 復習・確認用
+    {"question": "高市早苗さんは何歳ですか？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\nBorn: March 7, 1961\n\nUser asks about Takaichi's age.\n\nAs of 2024, Sanae Takaichi is 63 years old (born 1961).",
+     "final_answer": "高市早苗さんは1961年3月7日生まれで、2024年現在63歳です。"},
+
+    {"question": "高市早苗さんの出身大学は？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nUniversity: Kobe University (神戸大学), Faculty of Economics\nGraduate study: University of Maryland (US)\n\nKobe University is a prestigious national university in Japan.",
+     "final_answer": "高市早苗さんの出身大学は神戸大学経済学部です。"},
+
+    {"question": "高市早苗さんはサナエノミクスを提唱していますか？",
+     "analysis": "Key entities:\n- 高市早苗 (Sanae Takaichi)\n- サナエノミクス (Sanaenomics)\n\nYes, Sanaenomics is Takaichi's signature economic policy framework, emphasizing aggressive fiscal stimulus, continued monetary easing, and economic security.",
+     "final_answer": "はい、高市早苗さんは「サナエノミクス」という経済政策を提唱しています。"},
+
+    {"question": "高市早苗さんは経済安全保障を重視していますか？",
+     "analysis": "Key entities:\n- 高市早苗 (Sanae Takaichi)\n- 経済安全保障 (Economic Security)\n\nYes, very much. She served as Minister for Economic Security (2022-2023) and considers it a key policy priority. Economic security is a core pillar of her policy platform.",
+     "final_answer": "はい、高市早苗さんは経済安全保障を非常に重視しており、経済安全保障担当大臣（2022-2023年）を務めました。政策の中核的柱の一つです。"},
+
+    {"question": "高市早苗さんと岸田文雄さんはどちらが保守的ですか？",
+     "analysis": "Key entities:\n- 高市早苗 (Sanae Takaichi) - Conservative wing\n- 岸田文雄 (Fumio Kishida) - Moderate/centrist\n\nComparison: Takaichi is more conservative.\n\nTakaichi represents the conservative wing with strong positions on constitution, security, and traditional values. Kishida is more centrist/moderate, focusing on income distribution and social issues.",
+     "final_answer": "高市早苗さんの方がより保守的です。高市さんは自民党内の保守派を代表し、岸田文雄さんは穏健派・中道的な立場です。"},
+
+    {"question": "高市早苗さんの政治信条は？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nPolitical beliefs:\n1. Strong Japan through economic growth\n2. National security and sovereignty\n3. Traditional values with modern policy\n4. Self-reliance in economy and defense\n5. Pride in Japanese history and culture",
+     "final_answer": "高市早苗さんの政治信条は、経済成長による強い日本の実現、国家の安全保障と主権の重視、伝統的価値観の尊重、経済・防衛における自立、日本の歴史と文化への誇りなどです。"},
+
+    {"question": "高市早苗さんは消費税減税を主張していますか？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\nPolicy: Sanaenomics (サナエノミクス)\n\nPosition on consumption tax:\n- Cautious about tax increases\n- Open to temporary reduction depending on economic conditions\n- Prioritizes deflation escape over fiscal consolidation\n- Flexible approach based on economic situation",
+     "final_answer": "高市早苗さんは消費税増税に慎重で、経済状況次第では一時的な減税も視野に入れています。デフレ脱却を財政再建より優先する立場です。"},
+
+    {"question": "高市早苗さんはどのような経歴の政治家ですか？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nCareer summary:\n- First elected 1993 (age 32) - young female politician\n- Multiple ministerial posts (Gender Equality, Communications, Economic Security)\n- Record-breaking tenure as Communications Minister (2014-2017)\n- Two LDP presidential runs (2021, 2024)\n- 9-term veteran with over 30 years experience\n- Known for digital policy and economic security expertise",
+     "final_answer": "高市早苗さんは1993年に32歳で初当選した若手女性政治家で、総務大臣（戦後最長）、経済安全保障担当大臣などの要職を歴任した9期のベテラン政治家です。デジタル政策と経済安全保障が専門分野です。"},
+
+    {"question": "高市早苗さんの政治的影響力は？",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nPolitical influence:\n1. Leading conservative voice in LDP\n2. Significant grassroots support (evident in presidential runs)\n3. Policy expertise (digital, economic security)\n4. Inheritor of Abe's political legacy\n5. Influence on party policy direction\n\nWhile not currently Prime Minister, she wields considerable influence within the LDP.",
+     "final_answer": "高市早苗さんは自民党内の保守派の有力者として、政策立案や党の方向性に大きな影響力を持っています。特にデジタル政策や経済安全保障分野での専門性が評価されています。"},
+
+    {"question": "高市早苗さんについて簡単に説明してください",
+     "analysis": "Key entity: 高市早苗 (Sanae Takaichi)\n\nComprehensive overview:\n\nSanae Takaichi is a prominent conservative Japanese politician:\n- Born: March 7, 1961 in Nara\n- Education: Kobe University (Economics)\n- Political career: 9-term member of House of Representatives (since 1993)\n- Key positions: Minister of Internal Affairs and Communications (2014-2017, record tenure), Minister for Economic Security (2022-2023)\n- Electoral district: Nara 2nd District\n- Political stance: Conservative wing of LDP\n- Signature policy: Sanaenomics (economic policy)\n- Expertise: Digital policy, economic security\n- LDP presidential runs: 2021, 2024",
+     "final_answer": "高市早苗さんは1961年奈良県生まれの自民党保守派の有力政治家です。1993年に初当選し現在9期目。総務大臣（2014-2017年、戦後最長）、経済安全保障担当大臣（2022-2023年）を歴任。サナエノミクスを提唱し、デジタル政策と経済安全保障が専門分野。2021年と2024年に総裁選出馬。奈良県第2区選出。"},
+]
+
+# ============================================================================
+# メイン処理
+# ============================================================================
+
+def create_reasoning_dataset_v2():
+    """
+    固有名詞認識を含む推論データをHarmony形式で作成
+    """
+    print("=" * 80)
+    print("推論データセット作成 v2 - 固有名詞認識対応版")
+    print("=" * 80)
+    print(f"\n目標: {len(REASONING_SAMPLES_V2)}サンプルの推論データを作成")
+    print("形式: Harmony形式 + Analysis channel + 固有名詞日英対応")
+    print("\n【主要改善点】")
+    print("  ✅ Analysis channelに固有名詞の日英対応を明示")
+    print("  ✅ 「高市早苗 = Sanae Takaichi」を常に明記")
+    print(f"  ✅ 固有名詞辞書: {len(PROPER_NOUNS)}エントリー")
+    print()
+
+    reasoning_data = []
+
+    for i, sample in enumerate(REASONING_SAMPLES_V2, 1):
+        # Harmony形式に変換（Analysis channel付き）
+        harmony_item = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": sample["question"]
+                },
+                {
+                    "role": "assistant",
+                    "content": (
+                        f"<|channel|>analysis<|message|>{sample.get('analysis', '分析中...')}<|end|>"
+                        f"<|channel|>final<|message|>{sample.get('final_answer', '回答中...')}"
+                    )
+                }
+            ]
+        }
+        reasoning_data.append(harmony_item)
+
+        if i % 5 == 0:
+            print(f"  処理済み: {i}/{len(REASONING_SAMPLES_V2)}")
+
+    # JSONLファイルとして保存
+    output_path = "dataset/takaichi_sanae_reasoning_v2_proper_nouns.jsonl"
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        for item in reasoning_data:
+            f.write(json.dumps(item, ensure_ascii=False) + '\n')
+
+    print(f"\n✅ 推論データセット作成完了")
+    print(f"   保存先: {output_path}")
+    print(f"   サンプル数: {len(reasoning_data)}")
+
+    # 固有名詞辞書も保存
+    dict_path = "dataset/proper_nouns_dict.json"
+    with open(dict_path, 'w', encoding='utf-8') as f:
+        json.dump(PROPER_NOUNS, f, ensure_ascii=False, indent=2)
+
+    print(f"   固有名詞辞書: {dict_path} ({len(PROPER_NOUNS)}エントリー)")
+
+    print(f"\n【データセット構成】")
+    print(f"   推論データ（v2）: {len(reasoning_data)}サンプル（新規作成）")
+    print(f"   非推論データ: 455サンプル（既存のmerged_collection.json）")
+    print(f"   推論データ比率: {len(reasoning_data)/(len(reasoning_data)+455)*100:.1f}%")
+    print(f"\n【次のステップ】")
+    print(f"   1. 推論データを既存データとマージ")
+    print(f"   2. 第6次ファインチューニング実施")
+    print(f"   3. 固有名詞認識率の検証")
+    print(f"   4. 目標: 固有名詞認識率 95%以上")
+
+    return output_path
+
+
+if __name__ == "__main__":
+    create_reasoning_dataset_v2()
